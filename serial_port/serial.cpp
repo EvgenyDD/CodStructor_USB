@@ -31,10 +31,7 @@ void serial_port_setTimeout(serial_port_t *sp, Timeout *timeout)
 	}
 }
 
-Timeout serial_port_getTimeout(serial_port_t *sp)
-{
-	return sp->timeout_;
-}
+Timeout serial_port_getTimeout(serial_port_t *sp) { return sp->timeout_; }
 
 void serial_port_setBaudrate(serial_port_t *sp, unsigned long baudrate)
 {
@@ -45,10 +42,7 @@ void serial_port_setBaudrate(serial_port_t *sp, unsigned long baudrate)
 	}
 }
 
-unsigned long serial_port_getBaudrate(serial_port_t *sp)
-{
-	return sp->baudrate_;
-}
+unsigned long serial_port_getBaudrate(serial_port_t *sp) { return sp->baudrate_; }
 
 void serial_port_setBytesize(serial_port_t *sp, bytesize_t bytesize)
 {
@@ -59,10 +53,7 @@ void serial_port_setBytesize(serial_port_t *sp, bytesize_t bytesize)
 	}
 }
 
-bytesize_t serial_port_getBytesize(serial_port_t *sp)
-{
-	return sp->bytesize_;
-}
+bytesize_t serial_port_getBytesize(serial_port_t *sp) { return sp->bytesize_; }
 
 void serial_port_setParity(serial_port_t *sp, parity_t parity)
 {
@@ -73,10 +64,7 @@ void serial_port_setParity(serial_port_t *sp, parity_t parity)
 	}
 }
 
-parity_t serial_port_getParity(serial_port_t *sp)
-{
-	return sp->parity_;
-}
+parity_t serial_port_getParity(serial_port_t *sp) { return sp->parity_; }
 
 void serial_port_setStopbits(serial_port_t *sp, stopbits_t stopbits)
 {
@@ -87,10 +75,7 @@ void serial_port_setStopbits(serial_port_t *sp, stopbits_t stopbits)
 	}
 }
 
-stopbits_t serial_port_getStopbits(serial_port_t *sp)
-{
-	return sp->stopbits_;
-}
+stopbits_t serial_port_getStopbits(serial_port_t *sp) { return sp->stopbits_; }
 
 void serial_port_setFlowcontrol(serial_port_t *sp, flowcontrol_t flowcontrol)
 {
@@ -101,10 +86,7 @@ void serial_port_setFlowcontrol(serial_port_t *sp, flowcontrol_t flowcontrol)
 	}
 }
 
-flowcontrol_t serial_port_getFlowcontrol(serial_port_t *sp)
-{
-	return sp->flowcontrol_;
-}
+flowcontrol_t serial_port_getFlowcontrol(serial_port_t *sp) { return sp->flowcontrol_; }
 
 void serial_port_init(serial_port_t *sp,
 					  const std::string &port,
@@ -377,10 +359,7 @@ static size_t _serial_port_read(serial_port_t *sp, std::vector<uint8_t> *buf)
 				printf("[E]WaitCommEvent failed\n");
 				return 0;
 			}
-			else
-			{
-				sp->evt_waiting = true;
-			}
+			sp->evt_waiting = true;
 		}
 		else
 		{
@@ -460,23 +439,14 @@ static size_t _serial_port_write(serial_port_t *sp, const uint8_t *data, size_t 
 		}
 	}
 #else
-	if(!WriteFile(sp->fd_, data, static_cast<DWORD>(length), &bytes_written, nullptr))
-	{
-		return 0;
-	}
+	if(!WriteFile(sp->fd_, data, static_cast<DWORD>(length), &bytes_written, nullptr)) return 0;
 #endif
 	return bytes_written;
 }
 
-static void _serial_port_setPort(serial_port_t *sp, const std::string *port)
-{
-	sp->port_ = std::wstring(port->begin(), port->end());
-}
+static void _serial_port_setPort(serial_port_t *sp, const std::string *port) { sp->port_ = std::wstring(port->begin(), port->end()); }
 
-std::string serial_port_getPort(serial_port_t *sp)
-{
-	return std::string(sp->port_.begin(), sp->port_.end());
-}
+std::string serial_port_getPort(serial_port_t *sp) { return std::string(sp->port_.begin(), sp->port_.end()); }
 
 static void _serial_port_flush(serial_port_t *sp)
 {
@@ -666,8 +636,7 @@ MillisecondTimer::MillisecondTimer(const uint32_t millis)
 	}
 }
 
-int64_t
-MillisecondTimer::remaining()
+int64_t MillisecondTimer::remaining()
 {
 	timespec now(timespec_now());
 	int64_t millis = (expiry.tv_sec - now.tv_sec) * 1e3;
@@ -675,8 +644,7 @@ MillisecondTimer::remaining()
 	return millis;
 }
 
-timespec
-MillisecondTimer::timespec_now()
+timespec MillisecondTimer::timespec_now()
 {
 	timespec time;
 #ifdef __MACH__ // OS X does not have clock_gettime, use clock_get_time
@@ -693,8 +661,7 @@ MillisecondTimer::timespec_now()
 	return time;
 }
 
-timespec
-timespec_from_ms(const uint32_t millis)
+timespec timespec_from_ms(const uint32_t millis)
 {
 	timespec time;
 	time.tv_sec = millis / 1e3;
@@ -790,135 +757,48 @@ void serial_por_reconfigurePort(serial_port_t *sp)
 	speed_t baud;
 	switch(baudrate_)
 	{
-#ifdef B0
 	case 0: baud = B0; break;
-#endif
-#ifdef B50
 	case 50: baud = B50; break;
-#endif
-#ifdef B75
 	case 75: baud = B75; break;
-#endif
-#ifdef B110
 	case 110: baud = B110; break;
-#endif
-#ifdef B134
 	case 134: baud = B134; break;
-#endif
-#ifdef B150
 	case 150: baud = B150; break;
-#endif
-#ifdef B200
 	case 200: baud = B200; break;
-#endif
-#ifdef B300
 	case 300: baud = B300; break;
-#endif
-#ifdef B600
 	case 600: baud = B600; break;
-#endif
-#ifdef B1200
 	case 1200: baud = B1200; break;
-#endif
-#ifdef B1800
 	case 1800: baud = B1800; break;
-#endif
-#ifdef B2400
 	case 2400: baud = B2400; break;
-#endif
-#ifdef B4800
 	case 4800: baud = B4800; break;
-#endif
-#ifdef B7200
 	case 7200: baud = B7200; break;
-#endif
-#ifdef B9600
 	case 9600: baud = B9600; break;
-#endif
-#ifdef B14400
 	case 14400: baud = B14400; break;
-#endif
-#ifdef B19200
 	case 19200: baud = B19200; break;
-#endif
-#ifdef B28800
 	case 28800: baud = B28800; break;
-#endif
-#ifdef B57600
 	case 57600: baud = B57600; break;
-#endif
-#ifdef B76800
 	case 76800: baud = B76800; break;
-#endif
-#ifdef B38400
 	case 38400: baud = B38400; break;
-#endif
-#ifdef B115200
 	case 115200: baud = B115200; break;
-#endif
-#ifdef B128000
 	case 128000: baud = B128000; break;
-#endif
-#ifdef B153600
 	case 153600: baud = B153600; break;
-#endif
-#ifdef B230400
 	case 230400: baud = B230400; break;
-#endif
-#ifdef B256000
 	case 256000: baud = B256000; break;
-#endif
-#ifdef B460800
 	case 460800: baud = B460800; break;
-#endif
-#ifdef B500000
 	case 500000: baud = B500000; break;
-#endif
-#ifdef B576000
 	case 576000: baud = B576000; break;
-#endif
-#ifdef B921600
 	case 921600: baud = B921600; break;
-#endif
-#ifdef B1000000
 	case 1000000: baud = B1000000; break;
-#endif
-#ifdef B1152000
 	case 1152000: baud = B1152000; break;
-#endif
-#ifdef B1500000
 	case 1500000: baud = B1500000; break;
-#endif
-#ifdef B2000000
 	case 2000000: baud = B2000000; break;
-#endif
-#ifdef B2500000
 	case 2500000: baud = B2500000; break;
-#endif
-#ifdef B3000000
 	case 3000000: baud = B3000000; break;
-#endif
-#ifdef B3500000
 	case 3500000: baud = B3500000; break;
-#endif
-#ifdef B4000000
 	case 4000000: baud = B4000000; break;
 #endif
 	default:
 		custom_baud = true;
-		// OS X support
-#if defined(MAC_OS_X_VERSION_10_4) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_4)
-		// Starting with Tiger, the IOSSIOSPEED ioctl can be used to set arbitrary baud rates
-		// other than those specified by POSIX. The driver for the underlying serial hardware
-		// ultimately determines which baud rates can be used. This ioctl sets both the input
-		// and output speed.
-		speed_t new_baud = static_cast<speed_t>(baudrate_);
-		if(-1 == ioctl(fd_, IOSSIOSPEED, &new_baud, 1))
-		{
-			THROW(IOException, errno);
-		}
-		// Linux Support
-#elif defined(__linux__) && defined(TIOCSSERIAL)
+#if defined(__linux__) && defined(TIOCSSERIAL)
 		struct serial_struct ser;
 
 		if(-1 == ioctl(fd_, TIOCGSERIAL, &ser))
@@ -937,7 +817,7 @@ void serial_por_reconfigurePort(serial_port_t *sp)
 			THROW(IOException, errno);
 		}
 #else
-		throw invalid_argument("OS does not currently support custom bauds");
+throw invalid_argument("OS does not currently support custom bauds");
 #endif
 	}
 	if(custom_baud == false)
@@ -945,8 +825,8 @@ void serial_por_reconfigurePort(serial_port_t *sp)
 #ifdef _BSD_SOURCE
 		::cfsetspeed(&options, baud);
 #else
-		::cfsetispeed(&options, baud);
-		::cfsetospeed(&options, baud);
+	::cfsetispeed(&options, baud);
+	::cfsetospeed(&options, baud);
 #endif
 	}
 
@@ -998,11 +878,11 @@ void serial_por_reconfigurePort(serial_port_t *sp)
 		options.c_cflag &= (tcflag_t) ~(PARODD);
 	}
 #else
-	// CMSPAR is not defined on OSX. So do not support mark or space parity.
-	else if(parity_ == parity_mark || parity_ == parity_space)
-	{
-		throw invalid_argument("OS does not support mark or space parity");
-	}
+// CMSPAR is not defined on OSX. So do not support mark or space parity.
+else if(parity_ == parity_mark || parity_ == parity_space)
+{
+	throw invalid_argument("OS does not support mark or space parity");
+}
 #endif // ifdef CMSPAR
 	else
 	{
@@ -1031,10 +911,10 @@ void serial_por_reconfigurePort(serial_port_t *sp)
 	else
 		options.c_iflag &= (tcflag_t) ~(IXON | IXOFF | IXANY);
 #else
-	if(xonxoff_)
-		options.c_iflag |= (IXON | IXOFF);
-	else
-		options.c_iflag &= (tcflag_t) ~(IXON | IXOFF);
+if(xonxoff_)
+	options.c_iflag |= (IXON | IXOFF);
+else
+	options.c_iflag &= (tcflag_t) ~(IXON | IXOFF);
 #endif
 		// rtscts
 #ifdef CRTSCTS
@@ -1043,10 +923,10 @@ void serial_por_reconfigurePort(serial_port_t *sp)
 	else
 		options.c_cflag &= (unsigned long)~(CRTSCTS);
 #elif defined CNEW_RTSCTS
-	if(rtscts_)
-		options.c_cflag |= (CNEW_RTSCTS);
-	else
-		options.c_cflag &= (unsigned long)~(CNEW_RTSCTS);
+if(rtscts_)
+	options.c_cflag |= (CNEW_RTSCTS);
+else
+	options.c_cflag &= (unsigned long)~(CNEW_RTSCTS);
 #else
 #error "OS Support seems wrong."
 #endif
@@ -1322,10 +1202,7 @@ size_t _serial_port_write(serial_port_t *sp, const uint8_t *data, size_t length)
 	return bytes_written;
 }
 
-void serial_port_setPort(serial_port_t *sp, const std::string &port)
-{
-	sp->port_ = port;
-}
+void serial_port_setPort(serial_port_t *sp, const std::string &port) { sp->port_ = port; }
 
 std::string _serial_port_getPort(serial_port_t *sp) { return sp->port_; }
 
@@ -1726,15 +1603,12 @@ std::vector<PortInfo> serial_port_get_list(void)
 static std::vector<std::string> glob_(const vector<string> &patterns)
 {
 	std::vector<string> paths_found;
-
 	if(patterns.size() == 0) return paths_found;
 
 	glob_t glob_results;
-
 	int glob_retval = glob(patterns[0].c_str(), 0, nullptr, &glob_results);
 
 	std::vector<string>::const_iterator iter = patterns.begin();
-
 	while(++iter != patterns.end())
 	{
 		glob_retval = glob(iter->c_str(), GLOB_APPEND, nullptr, &glob_results);
@@ -1766,11 +1640,7 @@ static std::string dirname(const string &path)
 static bool path_exists(const string &path)
 {
 	struct stat sb;
-
-	if(stat(path.c_str(), &sb) == 0)
-		return true;
-
-	return false;
+	return stat(path.c_str(), &sb) == 0;
 }
 
 static std::string realpath_(const string &path)
