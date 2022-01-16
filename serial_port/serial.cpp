@@ -1,3 +1,4 @@
+#include "serial_interface.h"
 #include <chrono>
 #include <thread>
 
@@ -9,11 +10,10 @@
 
 #if defined(_WIN32)
 
-#include "serial_interface.h"
 #include <sstream>
 #include <stdio.h>
 
-//#define SERIAL_OVERLAP_MODE
+#define SERIAL_OVERLAP_MODE
 
 static std::wstring _prefix_port_if_needed(const std::wstring *input)
 {
@@ -340,7 +340,7 @@ size_t serial_port_available(serial_port_t *sp)
 	return CAST(size_t, cs.cbInQue);
 }
 
-static size_t _serial_port_read(serial_port_t *sp, std::vector<uint8_t> *buf)
+static size_t _serial_port_read(serial_port_t *sp, std::vector<uint8_t> buf)
 {
 	if(!sp->is_open_) return 0;
 
@@ -606,8 +606,6 @@ int serial_port_writeUnlock(serial_port_t *sp)
 #include <mach/mach.h>
 #endif
 
-#include "impl.hpp"
-
 #ifndef TIOCINQ
 #ifdef FIONREAD
 #define TIOCINQ FIONREAD
@@ -669,41 +667,51 @@ timespec timespec_from_ms(const uint32_t millis)
 	return time;
 }
 
-Serial::SerialImpl::SerialImpl(const string &port, unsigned long baudrate,
-							   bytesize_t bytesize,
-							   parity_t parity, stopbits_t stopbits,
-							   flowcontrol_t flowcontrol)
-	: port_(port), fd_(-1), is_open_(false), xonxoff_(false), rtscts_(false),
-	  baudrate_(baudrate), parity_(parity),
-	  bytesize_(bytesize), stopbits_(stopbits), flowcontrol_(flowcontrol)
+void serial_port_init(serial_port_t *sp,
+					  const std::string &port,
+					  unsigned long baudrate,
+					  bytesize_t bytesize,
+					  parity_t parity,
+					  stopbits_t stopbits,
+					  flowcontrol_t flowcontrol)
 {
+	sp->port_ = port;
+	sp->fd_ = -1;
+	sp->is_open_ = false;
+	sp->xonxoff_ = false;
+	sp->rtscts_ = false;
+	sp->baudrate_ = baudrate;
+	sp->parity_ = parity;
+	sp->bytesize_ = bytesize;
+	sp->stopbits_ = stopbits;
+	sp->flowcontrol_ = flowcontrol;
 	pthread_mutex_init(&this->read_mutex, NULL);
 	pthread_mutex_init(&this->write_mutex, NULL);
-	if(port_.empty() == false)
-		open();
 }
 
-void serial_port_deinit(serial_port_t *sp)
+int serial_port_deinit(serial_port_t *sp)
 {
 	_serial_port_close(sp);
 	pthread_mutex_destroy(&sp->read_mutex);
 	pthread_mutex_destroy(&sp->write_mutex);
 }
 
-void serial_port_open(serial_port_t *sp)
+int serial_port_open(serial_port_t *sp)
 {
-	if(port_.empty())
+	if(sp->port_.empty())
 	{
-		throw invalid_argument("Empty port is invalid.");
+		printf("Empty port is invalid.\n");
+		return 1;
 	}
-	if(is_open_ == true)
+	if(sp->is_open_ == true)
 	{
-		throw SerialException("Serial port already open.");
+		printf("Serial port already open.\n");
+		return 2;
 	}
 
-	fd_ = ::open(port_.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+	sp->fd_ = open(sp->port_.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
 
-	if(fd_ == -1)
+	if(sp->fd_ == -1)
 	{
 		switch(errno)
 		{
@@ -719,11 +727,11 @@ void serial_port_open(serial_port_t *sp)
 		}
 	}
 
-	reconfigurePort();
-	is_open_ = true;
+	serial_port_reconfigure(sp);
+	sp->is_open_ = true;
 }
 
-void serial_por_reconfigurePort(serial_port_t *sp)
+int serial_port_reconfigure(serial_port_t *sp)
 {
 	if(sp->fd_ == -1)
 	{
@@ -733,29 +741,28 @@ void serial_por_reconfigurePort(serial_port_t *sp)
 
 	struct termios options; // The options for the file descriptor
 
-	if(tcgetattr(fd_, &options) == -1)
+	if(tcgetattr(sp->fd_, &options) == -1)
 	{
 		THROW(IOException, "::tcgetattr");
 	}
 
 	// set up raw mode / no echo / binary
-	options.c_cflag |= (tcflag_t)(CLOCAL | CREAD);
-	options.c_lflag &= (tcflag_t) ~(ICANON | ECHO | ECHOE | ECHOK | ECHONL |
-									ISIG | IEXTEN); //|ECHOPRT
+	options.c_cflag |= CAST(tcflag_t, CLOCAL | CREAD);
+	options.c_lflag &= CAST(tcflag_t, ~(ICANON | ECHO | ECHOE | ECHOK | ECHONL | ISIG | IEXTEN)); //|ECHOPRT
 
-	options.c_oflag &= (tcflag_t) ~(OPOST);
-	options.c_iflag &= (tcflag_t) ~(INLCR | IGNCR | ICRNL | IGNBRK);
+	options.c_oflag &= CAST(tcflag_t, ~(OPOST));
+	options.c_iflag &= CAST(tcflag_t, ~(INLCR | IGNCR | ICRNL | IGNBRK));
 #ifdef IUCLC
-	options.c_iflag &= (tcflag_t)~IUCLC;
+	options.c_iflag &= CAST(tcflag_t, ~IUCLC);
 #endif
 #ifdef PARMRK
-	options.c_iflag &= (tcflag_t)~PARMRK;
+	options.c_iflag &= CAST(tcflag_t, ~PARMRK);
 #endif
 
 	// setup baud rate
 	bool custom_baud = false;
 	speed_t baud;
-	switch(baudrate_)
+	switch(sp->baudrate_)
 	{
 	case 0: baud = B0; break;
 	case 50: baud = B50; break;
@@ -770,17 +777,12 @@ void serial_por_reconfigurePort(serial_port_t *sp)
 	case 1800: baud = B1800; break;
 	case 2400: baud = B2400; break;
 	case 4800: baud = B4800; break;
-	case 7200: baud = B7200; break;
 	case 9600: baud = B9600; break;
-	case 14400: baud = B14400; break;
 	case 19200: baud = B19200; break;
-	case 28800: baud = B28800; break;
 	case 57600: baud = B57600; break;
-	case 76800: baud = B76800; break;
 	case 38400: baud = B38400; break;
 	case 115200: baud = B115200; break;
 	case 128000: baud = B128000; break;
-	case 153600: baud = B153600; break;
 	case 230400: baud = B230400; break;
 	case 256000: baud = B256000; break;
 	case 460800: baud = B460800; break;
@@ -793,55 +795,51 @@ void serial_por_reconfigurePort(serial_port_t *sp)
 	case 2000000: baud = B2000000; break;
 	case 2500000: baud = B2500000; break;
 	case 3000000: baud = B3000000; break;
-	case 3500000: baud = B3500000; break;
-	case 4000000: baud = B4000000; break;
-#endif
 	default:
 		custom_baud = true;
 #if defined(__linux__) && defined(TIOCSSERIAL)
 		struct serial_struct ser;
 
-		if(-1 == ioctl(fd_, TIOCGSERIAL, &ser))
+		if(-1 == ioctl(sp->fd_, TIOCGSERIAL, &ser))
 		{
 			THROW(IOException, errno);
 		}
 
 		// set custom divisor
-		ser.custom_divisor = ser.baud_base / static_cast<int>(baudrate_);
+		ser.custom_divisor = ser.baud_base / CAST(int, sp->baudrate_);
 		// update flags
 		ser.flags &= ~ASYNC_SPD_MASK;
 		ser.flags |= ASYNC_SPD_CUST;
 
-		if(-1 == ioctl(fd_, TIOCSSERIAL, &ser))
+		if(-1 == ioctl(sp->fd_, TIOCSSERIAL, &ser))
 		{
 			THROW(IOException, errno);
 		}
 #else
-throw invalid_argument("OS does not currently support custom bauds");
+		throw invalid_argument("OS does not currently support custom bauds");
 #endif
 	}
 	if(custom_baud == false)
 	{
 #ifdef _BSD_SOURCE
-		::cfsetspeed(&options, baud);
+		cfsetspeed(&options, baud);
 #else
-	::cfsetispeed(&options, baud);
-	::cfsetospeed(&options, baud);
+		cfsetispeed(&options, baud);
+		cfsetospeed(&options, baud);
 #endif
 	}
 
 	// setup char len
 	options.c_cflag &= (tcflag_t)~CSIZE;
-	if(bytesize_ == eightbits)
-		options.c_cflag |= CS8;
-	else if(bytesize_ == sevenbits)
-		options.c_cflag |= CS7;
-	else if(bytesize_ == sixbits)
-		options.c_cflag |= CS6;
-	else if(bytesize_ == fivebits)
-		options.c_cflag |= CS5;
-	else
-		throw invalid_argument("invalid char len");
+	switch(sp->bytesize_)
+	{
+	case fivebits: options.c_cflag |= CS5; break;
+	case sixbits: options.c_cflag |= CS6; break;
+	case sevenbits: options.c_cflag |= CS7; break;
+	default:
+	case eightbits: options.c_cflag |= CS8; break;
+	}
+
 	// setup stopbits
 	if(stopbits_ == stopbits_one)
 		options.c_cflag &= (tcflag_t) ~(CSTOPB);
@@ -850,8 +848,7 @@ throw invalid_argument("OS does not currently support custom bauds");
 		options.c_cflag |= (CSTOPB);
 	else if(stopbits_ == stopbits_two)
 		options.c_cflag |= (CSTOPB);
-	else
-		throw invalid_argument("invalid stop bit");
+
 	// setup parity
 	options.c_iflag &= (tcflag_t) ~(INPCK | ISTRIP);
 	if(parity_ == parity_none)
@@ -878,55 +875,52 @@ throw invalid_argument("OS does not currently support custom bauds");
 		options.c_cflag &= (tcflag_t) ~(PARODD);
 	}
 #else
-// CMSPAR is not defined on OSX. So do not support mark or space parity.
-else if(parity_ == parity_mark || parity_ == parity_space)
-{
-	throw invalid_argument("OS does not support mark or space parity");
-}
+	// CMSPAR is not defined on OSX. So do not support mark or space parity.
+	else if(parity_ == parity_mark || parity_ == parity_space)
+	{
+		throw invalid_argument("OS does not support mark or space parity");
+	}
 #endif // ifdef CMSPAR
-	else
-	{
-		throw invalid_argument("invalid parity");
-	}
+
 	// setup flow control
-	if(flowcontrol_ == flowcontrol_none)
+	if(sp->flowcontrol_ == flowcontrol_none)
 	{
-		xonxoff_ = false;
-		rtscts_ = false;
+		sp->xonxoff_ = false;
+		sp->rtscts_ = false;
 	}
-	if(flowcontrol_ == flowcontrol_software)
+	if(sp->flowcontrol_ == flowcontrol_software)
 	{
-		xonxoff_ = true;
-		rtscts_ = false;
+		sp->xonxoff_ = true;
+		sp->rtscts_ = false;
 	}
-	if(flowcontrol_ == flowcontrol_hardware)
+	if(sp->flowcontrol_ == flowcontrol_hardware)
 	{
-		xonxoff_ = false;
-		rtscts_ = true;
+		sp->xonxoff_ = false;
+		sp->rtscts_ = true;
 	}
 	// xonxoff
 #ifdef IXANY
-	if(xonxoff_)
+	if(sp->xonxoff_)
 		options.c_iflag |= (IXON | IXOFF); //|IXANY)
 	else
-		options.c_iflag &= (tcflag_t) ~(IXON | IXOFF | IXANY);
+		options.c_iflag &= CAST(tcflag_t, ~(IXON | IXOFF | IXANY));
 #else
-if(xonxoff_)
-	options.c_iflag |= (IXON | IXOFF);
-else
-	options.c_iflag &= (tcflag_t) ~(IXON | IXOFF);
+	if(xonxoff_)
+		options.c_iflag |= (IXON | IXOFF);
+	else
+		options.c_iflag &= (tcflag_t) ~(IXON | IXOFF);
 #endif
 		// rtscts
 #ifdef CRTSCTS
-	if(rtscts_)
+	if(sp->rtscts_)
 		options.c_cflag |= (CRTSCTS);
 	else
-		options.c_cflag &= (unsigned long)~(CRTSCTS);
+		options.c_cflag &= CAST(unsigned long, ~(CRTSCTS));
 #elif defined CNEW_RTSCTS
-if(rtscts_)
-	options.c_cflag |= (CNEW_RTSCTS);
-else
-	options.c_cflag &= (unsigned long)~(CNEW_RTSCTS);
+	if(rtscts_)
+		options.c_cflag |= (CNEW_RTSCTS);
+	else
+		options.c_cflag &= (unsigned long)~(CNEW_RTSCTS);
 #else
 #error "OS Support seems wrong."
 #endif
@@ -939,37 +933,38 @@ else
 	options.c_cc[VTIME] = 0;
 
 	// activate settings
-	::tcsetattr(fd_, TCSANOW, &options);
+	::tcsetattr(sp->fd_, TCSANOW, &options);
 
 	// Update byte_time_ based on the new settings.
-	uint32_t bit_time_ns = 1e9 / baudrate_;
-	byte_time_ns_ = bit_time_ns * (1 + bytesize_ + parity_ + stopbits_);
+	uint32_t bit_time_ns = 1e9 / sp->baudrate_;
+	sp->byte_time_ns_ = bit_time_ns * (1 + sp->bytesize_ + sp->parity_ + sp->stopbits_);
 
 	// Compensate for the stopbits_one_point_five enum being equal to int 3,
 	// and not 1.5.
-	if(stopbits_ == stopbits_one_point_five)
+	if(sp->stopbits_ == stopbits_one_point_five)
 	{
-		byte_time_ns_ += ((1.5 - stopbits_one_point_five) * bit_time_ns);
+		sp->byte_time_ns_ += ((1.5 - stopbits_one_point_five) * bit_time_ns);
 	}
 }
 
-void serial_port_close(serial_port_t *sp)
+int serial_port_close(serial_port_t *sp)
 {
-	if(!sp->is_open_) return;
+	if(!sp->is_open_) return -1;
 	if(sp->fd_ != -1)
 	{
 		int ret;
-		ret = ::close(sp->fd_);
+		ret = close(sp->fd_);
 		if(ret == 0)
 		{
 			sp->fd_ = -1;
 		}
 		else
 		{
-			THROW(IOException, errno);
+			return -2;
 		}
 	}
 	sp->is_open_ = false;
+	return 0;
 }
 
 size_t serial_port_available(serial_port_t *sp)
@@ -986,56 +981,57 @@ size_t serial_port_available(serial_port_t *sp)
 	}
 }
 
-bool serial_port_waitReadable(serial_port_t *sp, uint32_t timeout)
+int serial_port_waitReadable(serial_port_t *sp, uint32_t timeout)
 {
 	// Setup a select call to block for serial data or a timeout
 	fd_set readfds;
 	FD_ZERO(&readfds);
-	FD_SET(fd_, &readfds);
+	FD_SET(sp->fd_, &readfds);
 	timespec timeout_ts(timespec_from_ms(timeout));
-	int r = pselect(fd_ + 1, &readfds, NULL, NULL, &timeout_ts, NULL);
+	int r = pselect(sp->fd_ + 1, &readfds, nullptr, nullptr, &timeout_ts, nullptr);
 	if(r < 0)
 	{
 		// Select was interrupted
-		if(errno == EINTR) return false;
+		if(errno == EINTR) return 0;
 		// Otherwise there was some error
-		THROW(IOException, errno);
+		printf("[E]\twaitReadable error %d\n", errno);
+		return -1;
 	}
 	// Timeout occurred
 	if(r == 0)
 	{
-		return false;
+		return 0;
 	}
 	// This shouldn't happen, if r > 0 our fd has to be in the list!
-	if(!FD_ISSET(fd_, &readfds))
+	if(!FD_ISSET(sp->fd_, &readfds))
 	{
-		THROW(IOException, "select reports ready to read, but our fd isn't"
-						   " in the list, this shouldn't happen!");
+		printf("[E]\tselect reports ready to read, but our fd isn't in the list, this shouldn't happen!\n");
+		return -2;
 	}
 	// Data available to read.
-	return true;
+	return 1;
 }
 
 void serial_port_waitByteTimes(serial_port_t *sp, size_t count)
 {
-	timespec wait_time = {0, CAST(long, byte_time_ns_ *count)};
-	pselect(0, NULL, NULL, NULL, &wait_time, NULL);
+	timespec wait_time = {0, CAST(long, sp->byte_time_ns_ *count)};
+	pselect(0, nullptr, nullptr, nullptr, &wait_time, nullptr);
 }
 
-size_t _serial_port_read(serial_port_t *sp, uint8_t *buf, size_t size)
+int _read(serial_port_t *sp, uint8_t *buf, size_t size)
 {
 	// If the port is not open, throw
 	if(!sp->is_open_) return 0;
 	size_t bytes_read = 0;
 
 	// Calculate total timeout in milliseconds t_c + (t_m * N)
-	long total_timeout_ms = timeout_.read_timeout_constant;
-	total_timeout_ms += timeout_.read_timeout_multiplier * static_cast<long>(size);
+	long total_timeout_ms = sp->timeout_.read_timeout_constant;
+	total_timeout_ms += sp->timeout_.read_timeout_multiplier * static_cast<long>(size);
 	MillisecondTimer total_timeout(total_timeout_ms);
 
 	// Pre-fill buffer with available bytes
 	{
-		ssize_t bytes_read_now = ::read(fd_, buf, size);
+		ssize_t bytes_read_now = read(sp->fd_, buf, size);
 		if(bytes_read_now > 0)
 		{
 			bytes_read = bytes_read_now;
@@ -1053,14 +1049,19 @@ size_t _serial_port_read(serial_port_t *sp, uint8_t *buf, size_t size)
 		// Timeout for the next select is whichever is less of the remaining
 		// total read timeout and the inter-byte timeout.
 		uint32_t timeout = std::min(static_cast<uint32_t>(timeout_remaining_ms),
-									timeout_.inter_byte_timeout);
+									sp->timeout_.inter_byte_timeout);
 		// Wait for the device to be readable, and then attempt to read.
-		if(waitReadable(timeout))
+		int r = serial_port_waitReadable(sp, timeout);
+		if(r < 0)
+		{
+			return r;
+		}
+		if(r)
 		{
 			// If it's a fixed-length multi-byte read, insert a wait here so that
 			// we can attempt to grab the whole thing in a single IO call. Skip
 			// this wait if a non-max inter_byte_timeout is specified.
-			if(size > 1 && timeout_.inter_byte_timeout == Timeout::max())
+			if(size > 1 && sp->timeout_.inter_byte_timeout == Timeout::max())
 			{
 				size_t bytes_available = available();
 				if(bytes_available + bytes_read < size)
@@ -1070,8 +1071,7 @@ size_t _serial_port_read(serial_port_t *sp, uint8_t *buf, size_t size)
 			}
 			// This should be non-blocking returning only what is available now
 			//  Then returning so that select can block again.
-			ssize_t bytes_read_now =
-				::read(fd_, buf + bytes_read, size - bytes_read);
+			ssize_t bytes_read_now = read(sp->fd_, buf + bytes_read, size - bytes_read);
 			// read should always return some data as select reported it was
 			// ready to read when we get to this point.
 			if(bytes_read_now < 1)
@@ -1113,8 +1113,8 @@ size_t _serial_port_write(serial_port_t *sp, const uint8_t *data, size_t length)
 	size_t bytes_written = 0;
 
 	// Calculate total timeout in milliseconds t_c + (t_m * N)
-	long total_timeout_ms = timeout_.write_timeout_constant;
-	total_timeout_ms += timeout_.write_timeout_multiplier * static_cast<long>(length);
+	long total_timeout_ms = sp->timeout_.write_timeout_constant;
+	total_timeout_ms += sp->timeout_.write_timeout_multiplier * static_cast<long>(length);
 	MillisecondTimer total_timeout(total_timeout_ms);
 
 	bool first_iteration = true;
@@ -1133,10 +1133,10 @@ size_t _serial_port_write(serial_port_t *sp, const uint8_t *data, size_t length)
 		timespec timeout(timespec_from_ms(timeout_remaining_ms));
 
 		FD_ZERO(&writefds);
-		FD_SET(fd_, &writefds);
+		FD_SET(sp->fd_, &writefds);
 
 		// Do the select
-		int r = pselect(fd_ + 1, NULL, &writefds, NULL, &timeout, NULL);
+		int r = pselect(sp->fd_ + 1, nullptr, &writefds, nullptr, &timeout, nullptr);
 
 		// Figure out what happened by looking at select's response 'r'
 		/** Error **/
@@ -1148,7 +1148,8 @@ size_t _serial_port_write(serial_port_t *sp, const uint8_t *data, size_t length)
 				continue;
 			}
 			// Otherwise there was some error
-			THROW(IOException, errno);
+			printf("[E]\tError! %d\n", errno);
+			return 0;
 		}
 		/** Timeout **/
 		if(r == 0)
@@ -1159,11 +1160,11 @@ size_t _serial_port_write(serial_port_t *sp, const uint8_t *data, size_t length)
 		if(r > 0)
 		{
 			// Make sure our file descriptor is in the ready to write list
-			if(FD_ISSET(fd_, &writefds))
+			if(FD_ISSET(sp->fd_, &writefds))
 			{
 				// This will write some
 				ssize_t bytes_written_now =
-					::write(fd_, data + bytes_written, length - bytes_written);
+					::write(sp->fd_, data + bytes_written, length - bytes_written);
 				// write should always return some data as select reported it was
 				// ready to write when we get to this point.
 				if(bytes_written_now < 1)
@@ -1171,8 +1172,8 @@ size_t _serial_port_write(serial_port_t *sp, const uint8_t *data, size_t length)
 					// Disconnected devices, at least on Linux, show the
 					// behavior that they are always ready to write immediately
 					// but writing returns nothing.
-					throw SerialException("device reports readiness to write but "
-										  "returned no data (device disconnected?)");
+					printf("[E]\tDevice reports readiness to write but returned no data (device disconnected)\n");
+					return 0;
 				}
 				// Update bytes_written
 				bytes_written += static_cast<size_t>(bytes_written_now);
@@ -1189,24 +1190,23 @@ size_t _serial_port_write(serial_port_t *sp, const uint8_t *data, size_t length)
 				// If bytes_written > size then we have over written, which shouldn't happen
 				if(bytes_written > length)
 				{
-					throw SerialException("write over wrote, too many bytes where "
-										  "written, this shouldn't happen, might be "
-										  "a logical error!");
+					printf("[E]\tWrite over wrote, too many bytes where written, this shouldn't happen, might be a logical error!\n");
+					return 0;
 				}
 			}
 			// This shouldn't happen, if r > 0 our fd has to be in the list!
-			THROW(IOException, "select reports ready to write, but our fd isn't"
-							   " in the list, this shouldn't happen!");
+			printf("[E]\tselect reports ready to write, but our fd isn't in the list, this shouldn't happen!\n");
+			return 0;
 		}
 	}
 	return bytes_written;
 }
 
-void serial_port_setPort(serial_port_t *sp, const std::string &port) { sp->port_ = port; }
+void _serial_port_setPort(serial_port_t *sp, const std::string &port) { sp->port_ = port; }
 
 std::string _serial_port_getPort(serial_port_t *sp) { return sp->port_; }
 
-void serial_port_flush(serial_port_t *sp)
+void _serial_port_flush(serial_port_t *sp)
 {
 	if(sp->is_open_ == false) return;
 	tcdrain(sp->fd_);
@@ -1230,75 +1230,72 @@ void serial_port_sendBreak(serial_port_t *sp, int duration)
 	tcsendbreak(sp->fd_, static_cast<int>(duration / 4));
 }
 
-void serial_port_setBreak(serial_port_t *sp, bool level)
+int serial_port_setBreak(serial_port_t *sp, bool level)
 {
-	if(sp->is_open_ == false) return;
+	if(sp->is_open_ == false) return -1;
 	if(level)
 	{
 		if(-1 == ioctl(sp->fd_, TIOCSBRK))
 		{
-			stringstream ss;
-			ss << "setBreak failed on a call to ioctl(TIOCSBRK): " << errno << " " << strerror(errno);
-			throw(SerialException(ss.str().c_str()));
+			printf("[E]\tsetBreak failed on a call to ioctl(TIOCSBRK): %d\n", errno);
+			return -2;
 		}
 	}
 	else
 	{
 		if(-1 == ioctl(sp->fd_, TIOCCBRK))
 		{
-			stringstream ss;
-			ss << "setBreak failed on a call to ioctl(TIOCCBRK): " << errno << " " << strerror(errno);
-			throw(SerialException(ss.str().c_str()));
+			printf("[E]\tsetBreak failed on a call to ioctl(TIOCCBRK): %d\n", errno);
+			return -3;
 		}
 	}
+	return 0;
 }
 
-void serial_port_setRTS(serial_port_t *sp, bool level)
+int serial_port_setRTS(serial_port_t *sp, bool level)
 {
-	if(sp->is_open_ == false) return;
+	if(sp->is_open_ == false) return -1;
 	int command = TIOCM_RTS;
 	if(level)
 	{
 		if(-1 == ioctl(sp->fd_, TIOCMBIS, &command))
 		{
-			stringstream ss;
-			ss << "setRTS failed on a call to ioctl(TIOCMBIS): " << errno << " " << strerror(errno);
-			throw(SerialException(ss.str().c_str()));
+			printf("[E]\tsetRTS failed on a call to ioctl(TIOCMBIS): \n", errno);
+			return -2;
 		}
 	}
 	else
 	{
 		if(-1 == ioctl(sp->fd_, TIOCMBIC, &command))
 		{
-			stringstream ss;
-			ss << "setRTS failed on a call to ioctl(TIOCMBIC): " << errno << " " << strerror(errno);
-			throw(SerialException(ss.str().c_str()));
+			printf("[E]\tsetRTS failed on a call to ioctl(TIOCMBIC): %d\n", errno);
+			return -3;
 		}
 	}
+	return 0;
 }
 
-void serial_port_setDTR(serial_port_t *sp, bool level)
+int serial_port_setDTR(serial_port_t *sp, bool level)
 {
-	if(sp->is_open_ == false) return;
+	if(sp->is_open_ == false) return -1;
 	int command = TIOCM_DTR;
 	if(level)
 	{
 		if(-1 == ioctl(sp->fd_, TIOCMBIS, &command))
 		{
-			stringstream ss;
-			ss << "setDTR failed on a call to ioctl(TIOCMBIS): " << errno << " " << strerror(errno);
-			throw(SerialException(ss.str().c_str()));
+			printf("[E]\tsetDTR failed on a call to ioctl(TIOCMBIS): %d\n", errno);
+			return -2;
 		}
 	}
 	else
 	{
 		if(-1 == ioctl(sp->fd_, TIOCMBIC, &command))
 		{
-			stringstream ss;
-			ss << "setDTR failed on a call to ioctl(TIOCMBIC): " << errno << " " << strerror(errno);
-			throw(SerialException(ss.str().c_str()));
+			printf("[E]\tsetDTR failed on a call to ioctl(TIOCMBIC): %d\n", errno);
+			return -3;
 		}
 	}
+	return 0;
 }
 
 bool serial_port_waitForChange(serial_port_t *sp)
@@ -1340,9 +1337,7 @@ bool serial_port_getCTS(serial_port_t *sp)
 	int status;
 	if(-1 == ioctl(sp->fd_, TIOCMGET, &status))
 	{
-		stringstream ss;
-		ss << "getCTS failed on a call to ioctl(TIOCMGET): " << errno << " " << strerror(errno);
-		throw(SerialException(ss.str().c_str()));
+		printf("[E]\tError getting the status of the CTS line\n");
 	}
 	return 0 != (status & TIOCM_CTS);
 }
@@ -1353,9 +1348,7 @@ bool serial_port_getDSR(serial_port_t *sp)
 	int status;
 	if(-1 == ioctl(sp->fd_, TIOCMGET, &status))
 	{
-		stringstream ss;
-		ss << "getDSR failed on a call to ioctl(TIOCMGET): " << errno << " " << strerror(errno);
-		throw(SerialException(ss.str().c_str()));
+		printf("[E]\tError getting the status of the DSR line\n");
 	}
 	return 0 != (status & TIOCM_DSR);
 }
@@ -1366,9 +1359,7 @@ bool serial_port_getRI(serial_port_t *sp)
 	int status;
 	if(-1 == ioctl(sp->fd_, TIOCMGET, &status))
 	{
-		stringstream ss;
-		ss << "getRI failed on a call to ioctl(TIOCMGET): " << errno << " " << strerror(errno);
-		throw(SerialException(ss.str().c_str()));
+		printf("[E]\tError getting the status of the RI line\n");
 	}
 	return 0 != (status & TIOCM_RI);
 }
@@ -1379,53 +1370,59 @@ bool serial_port_getCD(serial_port_t *sp)
 	int status;
 	if(-1 == ioctl(sp->fd_, TIOCMGET, &status))
 	{
-		stringstream ss;
-		ss << "getCD failed on a call to ioctl(TIOCMGET): " << errno << " " << strerror(errno);
-		throw(SerialException(ss.str().c_str()));
+		printf("[E]\tError getting the status of the CD line\n");
 	}
 	return 0 != (status & TIOCM_CD);
 }
 
-void serial_port_readLock(serial_port_t *sp)
+int serial_port_readLock(serial_port_t *sp)
 {
 	int result = pthread_mutex_lock(&sp->read_mutex);
 	if(result)
 	{
-		THROW(IOException, result);
+		printf("==========");
+		return result;
 	}
+	return 0;
 }
 
-void serial_port_readUnlock(serial_port_t *sp)
+int serial_port_readUnlock(serial_port_t *sp)
 {
 	int result = pthread_mutex_unlock(&sp->read_mutex);
 	if(result)
 	{
-		THROW(IOException, result);
+		printf("==========");
+		return result;
 	}
+	return 0;
 }
 
-void serial_port_writeLock(serial_port_t *sp)
+int serial_port_writeLock(serial_port_t *sp)
 {
 	int result = pthread_mutex_lock(&sp->write_mutex);
 	if(result)
 	{
-		THROW(IOException, result);
+		printf("==========");
+		return result;
 	}
+	return 0;
 }
 
-void serial_port_writeUnlock(serial_port_t *sp)
+int serial_port_writeUnlock(serial_port_t *sp)
 {
 	int result = pthread_mutex_unlock(&sp->write_mutex);
 	if(result)
 	{
-		THROW(IOException, result);
+		printf("==========");
+		return result;
 	}
+	return 0;
 }
 
-size_t _serial_port_read(serial_port_t *sp, std::vector<uint8_t> *buf)
+size_t _serial_port_read(serial_port_t *sp, std::vector<uint8_t> buf)
 {
-	auto count = read(sp->buf_rx, sizeof(sp->buf_rx));
-	buf->assign(sp->buf_rx, sp->buf_rx + count);
+	size_t count = CAST(size_t, _read(sp, sp->buf_rx, sizeof(sp->buf_rx)));
+	buf.assign(sp->buf_rx, sp->buf_rx + count);
 	return count;
 }
 
@@ -1446,7 +1443,7 @@ size_t _serial_port_read(serial_port_t *sp, std::vector<uint8_t> *buf)
 size_t serial_port_read(serial_port_t *sp, std::vector<uint8_t> *buffer)
 {
 	serial_port_readLock(sp);
-	size_t readed = _serial_port_read(sp, buffer);
+	size_t readed = _serial_port_read(sp, *buffer);
 	serial_port_readUnlock(sp);
 	return readed;
 }
@@ -1467,7 +1464,7 @@ void serial_port_setPort(serial_port_t *sp, const std::string *port)
 	serial_port_writeLock(sp);
 	bool was_open = sp->is_open_;
 	if(was_open) serial_port_close(sp);
-	_serial_port_setPort(sp, port);
+	_serial_port_setPort(sp, *port);
 	if(was_open) serial_port_open(sp);
 	serial_port_writeUnlock(sp);
 	serial_port_readUnlock(sp);
@@ -1600,21 +1597,21 @@ std::vector<PortInfo> serial_port_get_list(void)
 #endif // #if defined(_WIN32)
 
 #if defined(__linux__) || defined(__CYGWIN__)
-static std::vector<std::string> glob_(const vector<string> &patterns)
+static std::vector<std::string> glob_(const std::vector<std::string> &patterns)
 {
-	std::vector<string> paths_found;
+	std::vector<std::string> paths_found;
 	if(patterns.size() == 0) return paths_found;
 
 	glob_t glob_results;
 	int glob_retval = glob(patterns[0].c_str(), 0, nullptr, &glob_results);
 
-	std::vector<string>::const_iterator iter = patterns.begin();
+	std::vector<std::string>::const_iterator iter = patterns.begin();
 	while(++iter != patterns.end())
 	{
 		glob_retval = glob(iter->c_str(), GLOB_APPEND, nullptr, &glob_results);
 	}
 
-	for(int path_index = 0; path_index < (int)glob_results.gl_pathc; path_index++)
+	for(int path_index = 0; path_index < CAST(int, glob_results.gl_pathc); path_index++)
 	{
 		paths_found.push_back(glob_results.gl_pathv[path_index]);
 	}
@@ -1622,28 +1619,28 @@ static std::vector<std::string> glob_(const vector<string> &patterns)
 	return paths_found;
 }
 
-static std::string basename(const string &path)
+static std::string basename(const std::string &path)
 {
 	size_t pos = path.rfind("/");
 	if(pos == std::string::npos) return path;
-	return string(path, pos + 1, string::npos);
+	return std::string(path, pos + 1, std::string::npos);
 }
 
-static std::string dirname(const string &path)
+static std::string dirname(const std::string &path)
 {
 	size_t pos = path.rfind("/");
 	if(pos == std::string::npos) return path;
 	if(pos == 0) return "/";
-	return string(path, 0, pos);
+	return std::string(path, 0, pos);
 }
 
-static bool path_exists(const string &path)
+static bool path_exists(const std::string &path)
 {
 	struct stat sb;
 	return stat(path.c_str(), &sb) == 0;
 }
 
-static std::string realpath_(const string &path)
+static std::string realpath_(const std::string &path)
 {
 	char *real_path = realpath(path.c_str(), nullptr);
 	std::string result;
@@ -1655,7 +1652,69 @@ static std::string realpath_(const string &path)
 	return result;
 }
 
-static std::string usb_sysfs_friendly_name(const string &sys_usb_path)
+static std::string format(const char *format, ...)
+{
+	va_list ap;
+	size_t buffer_size_bytes = 256;
+	std::string result;
+	char *buffer = CAST(char *, malloc(buffer_size_bytes));
+
+	if(buffer == nullptr) return result;
+
+	bool done = false;
+	unsigned int loop_count = 0;
+
+	while(!done)
+	{
+		va_start(ap, format);
+
+		int return_value = vsnprintf(buffer, buffer_size_bytes, format, ap);
+
+		if(return_value < 0)
+		{
+			done = true;
+		}
+		else if(return_value >= CAST(int, buffer_size_bytes))
+		{
+			// Realloc and try again.
+			buffer_size_bytes = CAST(size_t, return_value + 1);
+			char *new_buffer_ptr = CAST(char *, realloc(buffer, buffer_size_bytes));
+
+			if(new_buffer_ptr == nullptr)
+			{
+				done = true;
+			}
+			else
+			{
+				buffer = new_buffer_ptr;
+			}
+		}
+		else
+		{
+			result = buffer;
+			done = true;
+		}
+
+		va_end(ap);
+
+		if(++loop_count > 5) done = true;
+	}
+	free(buffer);
+	return result;
+}
+
+static std::string read_line(const std::string &file)
+{
+	std::ifstream ifs(file.c_str(), std::ifstream::in);
+	std::string line;
+	if(ifs)
+	{
+		getline(ifs, line);
+	}
+	return line;
+}
+
+static std::string usb_sysfs_friendly_name(const std::string &sys_usb_path)
 {
 	unsigned int device_number = 0;
 	std::istringstream(read_line(sys_usb_path + "/devnum")) >> device_number;
@@ -1666,7 +1725,22 @@ static std::string usb_sysfs_friendly_name(const string &sys_usb_path)
 	return format("%s %s %s", manufacturer.c_str(), product.c_str(), serial.c_str());
 }
 
-static std::vector<std::string> get_sysfs_info_(const string &device_path)
+static std::string usb_sysfs_hw_string(const std::string &sysfs_path)
+{
+	std::string serial_number = read_line(sysfs_path + "/serial");
+
+	if(serial_number.length() > 0)
+	{
+		serial_number = format("SNR=%s", serial_number.c_str());
+	}
+
+	std::string vid = read_line(sysfs_path + "/idVendor");
+	std::string pid = read_line(sysfs_path + "/idProduct");
+
+	return format("USB VID:PID=%s:%s %s", vid.c_str(), pid.c_str(), serial_number.c_str());
+}
+
+static std::vector<std::string> get_sysfs_info_(const std::string &device_path)
 {
 	std::string device_name = basename(device_path);
 	std::string friendly_name;
@@ -1696,117 +1770,40 @@ static std::vector<std::string> get_sysfs_info_(const string &device_path)
 	else
 	{
 		// Try to read ID string of PCI device
-		string sys_id_path = sys_device_path + "/id";
+		std::string sys_id_path = sys_device_path + "/id";
 		if(path_exists(sys_id_path)) hardware_id = read_line(sys_id_path);
 	}
 
 	if(friendly_name.empty()) friendly_name = device_name;
 	if(hardware_id.empty()) hardware_id = "n/a";
 
-	std::vector<string> result;
+	std::vector<std::string> result;
 	result.push_back(friendly_name);
 	result.push_back(hardware_id);
 	return result;
 }
 
-static std::string read_line(const string &file)
-{
-	std::ifstream ifs(file.c_str(), ifstream::in);
-	std::string line;
-	if(ifs)
-	{
-		getline(ifs, line);
-	}
-	return line;
-}
-
-static std::string format(const char *format, ...)
-{
-	va_list ap;
-	size_t buffer_size_bytes = 256;
-	std::string result;
-	char *buffer = (char *)malloc(buffer_size_bytes);
-
-	if(buffer == nullptr) return result;
-
-	bool done = false;
-	unsigned int loop_count = 0;
-
-	while(!done)
-	{
-		va_start(ap, format);
-
-		int return_value = vsnprintf(buffer, buffer_size_bytes, format, ap);
-
-		if(return_value < 0)
-		{
-			done = true;
-		}
-		else if(return_value >= (int)buffer_size_bytes)
-		{
-			// Realloc and try again.
-			buffer_size_bytes = return_value + 1;
-			char *new_buffer_ptr = (char *)realloc(buffer, buffer_size_bytes);
-
-			if(new_buffer_ptr == nullptr)
-			{
-				done = true;
-			}
-			else
-			{
-				buffer = new_buffer_ptr;
-			}
-		}
-		else
-		{
-			result = buffer;
-			done = true;
-		}
-
-		va_end(ap);
-
-		if(++loop_count > 5) done = true;
-	}
-	free(buffer);
-	return result;
-}
-
-static std::string usb_sysfs_hw_string(const string &sysfs_path)
-{
-	string serial_number = read_line(sysfs_path + "/serial");
-
-	if(serial_number.length() > 0)
-	{
-		serial_number = format("SNR=%s", serial_number.c_str());
-	}
-
-	std::string vid = read_line(sysfs_path + "/idVendor");
-	std::string pid = read_line(sysfs_path + "/idProduct");
-
-	return format("USB VID:PID=%s:%s %s", vid.c_str(), pid.c_str(), serial_number.c_str());
-}
-
 std::vector<PortInfo> serial_port_get_list(void)
 {
-	vector<PortInfo> results;
+	std::vector<PortInfo> results;
 
-	vector<string> search_globs;
+	std::vector<std::string> search_globs;
 	search_globs.push_back("/dev/ttyACM*");
 	search_globs.push_back("/dev/ttyS*");
 	search_globs.push_back("/dev/ttyUSB*");
 	search_globs.push_back("/dev/tty.*");
 	search_globs.push_back("/dev/cu.*");
 
-	vector<string> devices_found = glob_(search_globs);
+	std::vector<std::string> devices_found = glob_(search_globs);
 
-	vector<string>::iterator iter = devices_found.begin();
+	std::vector<std::string>::iterator iter = devices_found.begin();
 
 	while(iter != devices_found.end())
 	{
 		std::string device = *iter++;
-		vector<string> sysfs_info = get_sysfs_info_(device);
-		string friendly_name = sysfs_info[0];
-		string hardware_id = sysfs_info[1];
+		std::vector<std::string> sysfs_info = get_sysfs_info_(device);
+		std::string friendly_name = sysfs_info[0];
+		std::string hardware_id = sysfs_info[1];
 
 		PortInfo device_entry;
 		device_entry.port = device;

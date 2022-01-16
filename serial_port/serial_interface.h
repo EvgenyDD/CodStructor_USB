@@ -29,13 +29,17 @@ typedef unsigned __int64 uint64_t;
 #include <vector>
 
 #if defined(_WIN32)
-#include <cstring>
-#include <devguid.h>
-#include <initguid.h>
-#include <setupapi.h>
 #include <tchar.h>
-#include <windows.h>
+
 #include <winsock2.h> // before Windows.h, else Winsock 1 conflict
+
+#include <windows.h>
+
+#include <setupapi.h>
+
+#include <initguid.h>
+
+#include <devguid.h>
 static const DWORD port_name_max_length = 256;
 static const DWORD friendly_name_max_length = 256;
 static const DWORD hardware_id_max_length = 256;
@@ -93,7 +97,7 @@ struct Timeout
 {
 	static uint32_t max()
 	{
-		return INT_MAX;
+        return 10000000;
 	}
 
 	static Timeout simpleTimeout(uint32_t timeout)

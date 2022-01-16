@@ -1,0 +1,8 @@
+.qmake.stash
+*.Debug
+*.Release
+*.pro.user
+serial_port_test.pro.user
+.vscode/*
+debug/*
+release/*
