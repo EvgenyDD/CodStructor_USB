@@ -11,6 +11,10 @@
 
 #include "serial_port/serial_interface.h"
 
+#if 1
+#include "serial_port/serial.cpp"
+#endif 
+
 void enumerate_ports()
 {
 	std::vector<PortInfo> devices_found = serial_port_get_list();

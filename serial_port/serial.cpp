@@ -175,7 +175,7 @@ int serial_port_open(serial_port_t *sp)
 
 int serial_port_reconfigure(serial_port_t *sp)
 {
-	if(sp->fd_ == INVALID_HANDLE_VALUE) return 1;
+	if(sp->fd_ == INVALID_HANDLE_VALUE) return -11;
 
 	DCB dcbSerialParams;
 	memset(&dcbSerialParams, 0, sizeof(DCB));
@@ -183,7 +183,7 @@ int serial_port_reconfigure(serial_port_t *sp)
 	if(!GetCommState(sp->fd_, &dcbSerialParams))
 	{
 		printf("[E]\tError getting the serial port state\n");
-		return 2;
+		return -2;
 	}
 
 	// setup baud rate
@@ -685,28 +685,29 @@ void serial_port_init(serial_port_t *sp,
 	sp->bytesize_ = bytesize;
 	sp->stopbits_ = stopbits;
 	sp->flowcontrol_ = flowcontrol;
-	pthread_mutex_init(&this->read_mutex, NULL);
-	pthread_mutex_init(&this->write_mutex, NULL);
+	pthread_mutex_init(&sp->read_mutex, NULL);
+	pthread_mutex_init(&sp->write_mutex, NULL);
 }
 
 int serial_port_deinit(serial_port_t *sp)
 {
-	_serial_port_close(sp);
+	int sts = serial_port_close(sp);
 	pthread_mutex_destroy(&sp->read_mutex);
 	pthread_mutex_destroy(&sp->write_mutex);
+	return sts;
 }
 
 int serial_port_open(serial_port_t *sp)
 {
 	if(sp->port_.empty())
 	{
-		printf("Empty port is invalid.\n");
-		return 1;
+		printf("Empty port is invalid\n");
+		return -1;
 	}
 	if(sp->is_open_ == true)
 	{
-		printf("Serial port already open.\n");
-		return 2;
+		printf("Serial port already open\n");
+		return -2;
 	}
 
 	sp->fd_ = open(sp->port_.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
@@ -715,35 +716,33 @@ int serial_port_open(serial_port_t *sp)
 	{
 		switch(errno)
 		{
-		case EINTR:
-			// Recurse because this is a recoverable error.
-			open();
-			return;
+		case EINTR: return serial_port_open(sp); // Recurse because this is a recoverable error
+
 		case ENFILE:
 		case EMFILE:
-			THROW(IOException, "Too many file handles open.");
+			printf("[E]\tToo many file handles open\n");
+			return -4;
+
 		default:
-			THROW(IOException, errno);
+			printf("[E]\tUnknown error: %d\n", errno);
+			return -5;
 		}
 	}
 
 	serial_port_reconfigure(sp);
 	sp->is_open_ = true;
+	return 0;
 }
 
 int serial_port_reconfigure(serial_port_t *sp)
 {
-	if(sp->fd_ == -1)
-	{
-		// Can only operate on a valid file descriptor
-		THROW(IOException, "Invalid file descriptor, is the serial port open?");
-	}
+	if(sp->fd_ == -1) return -1;
 
 	struct termios options; // The options for the file descriptor
-
 	if(tcgetattr(sp->fd_, &options) == -1)
 	{
-		THROW(IOException, "::tcgetattr");
+		printf("[E]\tError getting the serial port state\n");
+		return -2;
 	}
 
 	// set up raw mode / no echo / binary
@@ -815,8 +814,6 @@ int serial_port_reconfigure(serial_port_t *sp)
 		{
 			THROW(IOException, errno);
 		}
-#else
-		throw invalid_argument("OS does not currently support custom bauds");
 #endif
 	}
 	if(custom_baud == false)
@@ -841,42 +838,42 @@ int serial_port_reconfigure(serial_port_t *sp)
 	}
 
 	// setup stopbits
-	if(stopbits_ == stopbits_one)
+	if(sp->stopbits_ == stopbits_one)
 		options.c_cflag &= (tcflag_t) ~(CSTOPB);
-	else if(stopbits_ == stopbits_one_point_five)
+	else if(sp->stopbits_ == stopbits_one_point_five)
 		// ONE POINT FIVE same as TWO.. there is no POSIX support for 1.5
 		options.c_cflag |= (CSTOPB);
-	else if(stopbits_ == stopbits_two)
+	else if(sp->stopbits_ == stopbits_two)
 		options.c_cflag |= (CSTOPB);
 
 	// setup parity
 	options.c_iflag &= (tcflag_t) ~(INPCK | ISTRIP);
-	if(parity_ == parity_none)
+	if(sp->parity_ == parity_none)
 	{
 		options.c_cflag &= (tcflag_t) ~(PARENB | PARODD);
 	}
-	else if(parity_ == parity_even)
+	else if(sp->parity_ == parity_even)
 	{
 		options.c_cflag &= (tcflag_t) ~(PARODD);
 		options.c_cflag |= (PARENB);
 	}
-	else if(parity_ == parity_odd)
+	else if(sp->parity_ == parity_odd)
 	{
 		options.c_cflag |= (PARENB | PARODD);
 	}
 #ifdef CMSPAR
-	else if(parity_ == parity_mark)
+	else if(sp->parity_ == parity_mark)
 	{
 		options.c_cflag |= (PARENB | CMSPAR | PARODD);
 	}
-	else if(parity_ == parity_space)
+	else if(sp->parity_ == parity_space)
 	{
 		options.c_cflag |= (PARENB | CMSPAR);
 		options.c_cflag &= (tcflag_t) ~(PARODD);
 	}
 #else
 	// CMSPAR is not defined on OSX. So do not support mark or space parity.
-	else if(parity_ == parity_mark || parity_ == parity_space)
+	else if(sp->parity_ == parity_mark || parity_ == parity_space)
 	{
 		throw invalid_argument("OS does not support mark or space parity");
 	}
@@ -945,6 +942,7 @@ int serial_port_reconfigure(serial_port_t *sp)
 	{
 		sp->byte_time_ns_ += ((1.5 - stopbits_one_point_five) * bit_time_ns);
 	}
+	return 0;
 }
 
 int serial_port_close(serial_port_t *sp)
@@ -960,6 +958,7 @@ int serial_port_close(serial_port_t *sp)
 		}
 		else
 		{
+			printf("[E]\tClose error (%d)\n", ret);
 			return -2;
 		}
 	}
@@ -967,17 +966,17 @@ int serial_port_close(serial_port_t *sp)
 	return 0;
 }
 
-size_t serial_port_available(serial_port_t *sp)
+int serial_port_available(serial_port_t *sp)
 {
-	if(!sp->is_open_) return 0;
+	if(!sp->is_open_) return -1;
 	int count = 0;
 	if(-1 == ioctl(sp->fd_, TIOCINQ, &count))
 	{
-		THROW(IOException, errno);
+		return -2;
 	}
 	else
 	{
-		return CAST(size_t, count);
+		return count;
 	}
 }
 
@@ -1063,10 +1062,11 @@ int _read(serial_port_t *sp, uint8_t *buf, size_t size)
 			// this wait if a non-max inter_byte_timeout is specified.
 			if(size > 1 && sp->timeout_.inter_byte_timeout == Timeout::max())
 			{
-				size_t bytes_available = available();
+				int bytes_available = serial_port_available(sp);
+				if(bytes_available < 0) return bytes_available;
 				if(bytes_available + bytes_read < size)
 				{
-					waitByteTimes(size - (bytes_available + bytes_read));
+					serial_port_waitByteTimes(sp, size - (bytes_available + bytes_read));
 				}
 			}
 			// This should be non-blocking returning only what is available now
@@ -1079,8 +1079,8 @@ int _read(serial_port_t *sp, uint8_t *buf, size_t size)
 				// Disconnected devices, at least on Linux, show the
 				// behavior that they are always ready to read immediately
 				// but reading returns nothing.
-				throw SerialException("device reports readiness to read but "
-									  "returned no data (device disconnected?)");
+				printf("[E]\tDevice reports readiness to read but returned no data (device disconnected?)\n");
+				return -3;
 			}
 			// Update bytes_read
 			bytes_read += static_cast<size_t>(bytes_read_now);
@@ -1097,9 +1097,8 @@ int _read(serial_port_t *sp, uint8_t *buf, size_t size)
 			// If bytes_read > size then we have over read, which shouldn't happen
 			if(bytes_read > size)
 			{
-				throw SerialException("read over read, too many bytes where "
-									  "read, this shouldn't happen, might be "
-									  "a logical error!");
+				printf("[E]\tRead over read, too many bytes where read, this shouldn't happen, might be a logical error!\n");
+				return -4;
 			}
 		}
 	}
@@ -1306,14 +1305,10 @@ bool serial_port_waitForChange(serial_port_t *sp)
 		int status;
 		if(-1 == ioctl(sp->fd_, TIOCMGET, &status))
 		{
-			stringstream ss;
-			ss << "waitForChange failed on a call to ioctl(TIOCMGET): " << errno << " " << strerror(errno);
-			throw(SerialException(ss.str().c_str()));
+			printf("[E]\twaitForChange failed on a call to ioctl(TIOCMGET): %d %s\n", errno, strerror(errno));
+			return false;
 		}
-		if(0 != (status & TIOCM_CTS) || 0 != (status & TIOCM_DSR) || 0 != (status & TIOCM_RI) || 0 != (status & TIOCM_CD))
-		{
-			return true;
-		}
+		if(0 != (status & TIOCM_CTS) || 0 != (status & TIOCM_DSR) || 0 != (status & TIOCM_RI) || 0 != (status & TIOCM_CD)) return true;
 
 		std::this_thread::sleep_for(std::chrono::microseconds(1000));
 	}
