@@ -340,7 +340,7 @@ size_t serial_port_available(serial_port_t *sp)
 	return CAST(size_t, cs.cbInQue);
 }
 
-static size_t _serial_port_read(serial_port_t *sp, std::vector<uint8_t> buf)
+static size_t _serial_port_read(serial_port_t *sp, std::vector<uint8_t> *buf)
 {
 	if(!sp->is_open_) return 0;
 
@@ -1259,7 +1259,7 @@ int serial_port_setRTS(serial_port_t *sp, bool level)
 	{
 		if(-1 == ioctl(sp->fd_, TIOCMBIS, &command))
 		{
-			printf("[E]\tsetRTS failed on a call to ioctl(TIOCMBIS): \n", errno);
+			printf("[E]\tsetRTS failed on a call to ioctl(TIOCMBIS): %d\n", errno);
 			return -2;
 		}
 	}
@@ -1414,10 +1414,10 @@ int serial_port_writeUnlock(serial_port_t *sp)
 	return 0;
 }
 
-size_t _serial_port_read(serial_port_t *sp, std::vector<uint8_t> buf)
+size_t _serial_port_read(serial_port_t *sp, std::vector<uint8_t> *buf)
 {
 	size_t count = CAST(size_t, _read(sp, sp->buf_rx, sizeof(sp->buf_rx)));
-	buf.assign(sp->buf_rx, sp->buf_rx + count);
+	buf->assign(sp->buf_rx, sp->buf_rx + count);
 	return count;
 }
 
@@ -1438,7 +1438,7 @@ size_t _serial_port_read(serial_port_t *sp, std::vector<uint8_t> buf)
 size_t serial_port_read(serial_port_t *sp, std::vector<uint8_t> *buffer)
 {
 	serial_port_readLock(sp);
-	size_t readed = _serial_port_read(sp, *buffer);
+	size_t readed = _serial_port_read(sp, buffer);
 	serial_port_readUnlock(sp);
 	return readed;
 }
@@ -1598,12 +1598,12 @@ static std::vector<std::string> glob_(const std::vector<std::string> &patterns)
 	if(patterns.size() == 0) return paths_found;
 
 	glob_t glob_results;
-	int glob_retval = glob(patterns[0].c_str(), 0, nullptr, &glob_results);
+	/*int glob_retval =*/ glob(patterns[0].c_str(), 0, nullptr, &glob_results);
 
 	std::vector<std::string>::const_iterator iter = patterns.begin();
 	while(++iter != patterns.end())
 	{
-		glob_retval = glob(iter->c_str(), GLOB_APPEND, nullptr, &glob_results);
+		/*glob_retval =*/ glob(iter->c_str(), GLOB_APPEND, nullptr, &glob_results);
 	}
 
 	for(int path_index = 0; path_index < CAST(int, glob_results.gl_pathc); path_index++)

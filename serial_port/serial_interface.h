@@ -308,7 +308,13 @@ private:
 //    std::unique_ptr<serial::Serial> serialPort;
 //};
 
-int serial_port_init(serial_port_t *sp);
+void serial_port_init(serial_port_t *sp,
+					  const std::string &port,
+					  unsigned long baudrate,
+					  bytesize_t bytesize,
+					  parity_t parity,
+					  stopbits_t stopbits,
+					  flowcontrol_t flowcontrol);
 int serial_port_deinit(serial_port_t *sp);
 
 int serial_port_open(serial_port_t *sp);
@@ -326,6 +332,9 @@ int serial_port_reconfigure(serial_port_t *sp);
 
 void serial_port_setTimeout(serial_port_t *sp, Timeout *timeout);
 Timeout serial_port_getTimeout(serial_port_t *sp);
+
+size_t serial_port_write(serial_port_t *sp, const std::vector<uint8_t> data);
+size_t serial_port_read(serial_port_t *sp, std::vector<uint8_t> *buffer);
 
 struct PortInfo
 {

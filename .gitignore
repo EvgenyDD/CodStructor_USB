@@ -6,3 +6,7 @@ serial_port_test.pro.user
 .vscode/*
 debug/*
 release/*
+*.o
+*.d
+*.exe
+*.user

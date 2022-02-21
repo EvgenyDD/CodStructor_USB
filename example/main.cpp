@@ -11,9 +11,9 @@
 
 #include "serial_port/serial_interface.h"
 
-#if 1
+#if 0
 #include "serial_port/serial.cpp"
-#endif 
+#endif
 
 void enumerate_ports()
 {
@@ -30,12 +30,12 @@ void enumerate_ports()
 	}
 }
 
-//int run(int argc, char **argv)
+// int run(int argc, char **argv)
 //{
-//  if(argc < 2) {
-//      print_usage();
-//    return 0;
-//  }
+//   if(argc < 2) {
+//       print_usage();
+//     return 0;
+//   }
 
 //  // Argument 1 is the serial port or enumerate flag
 //  string port(argv[1]);
@@ -147,5 +147,24 @@ int main(int argc, char **argv)
 	{
 		PortInfo device = *iter++;
 		printf("\t%s\t%s\t%s\n", device.port.c_str(), device.description.c_str(), device.hardware_id.c_str());
+	}
+
+	serial_port_t p = {0};
+	serial_port_init(&p, "/dev/ttyS6",
+							   115200,
+							   eightbits,
+							   parity_odd,
+							   stopbits_one,
+							   flowcontrol_none);
+	int sts = serial_port_open(&p);
+	printf("Open sts: %d\n", sts);
+	sts = serial_port_write(&p, {9, 0,1,2,3});
+	printf("Wr sts: %d\n", sts);
+	std::vector<uint8_t> b;
+	sts = serial_port_read(&p, &b);
+	printf("Rd sts: %d %d\n", sts, b.size());
+	for(auto i : b)
+	{
+		printf(">%d\n", i);
 	}
 }
